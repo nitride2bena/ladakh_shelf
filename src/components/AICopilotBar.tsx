@@ -39,7 +39,10 @@ export const AICopilotBar: React.FC<AICopilotBarProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!prompt.trim() && !imageDataUrl) return;
-    await onApplyPrompt(prompt.trim() || '첨부한 공간 사진에 어울리는 선반 사양을 추천해줘', imageDataUrl);
+    await onApplyPrompt(
+      prompt.trim() || '첨부한 공간 사진에 어울리는 선반 사양을 추천해줘',
+      imageDataUrl,
+    );
   };
 
   return (
@@ -52,29 +55,32 @@ export const AICopilotBar: React.FC<AICopilotBarProps> = ({
         borderColor: 'var(--border-color)',
       }}
     >
-      <div className="mb-2 flex items-center justify-between gap-2">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-1.5 text-xs font-semibold text-amber-500">
-          <Sparkles className="h-4 w-4" />
-          <span>Gemini AI 맞춤 사양 코파일럿 (자연어 &amp; 설치 공간 사진 분석)</span>
+          <Sparkles className="h-4 w-4 shrink-0" />
+          <span>
+            Gemini AI 맞춤 사양 코파일럿 (자연어 &amp; 설치 공간 사진 분석)
+          </span>
         </div>
-        {!compact && (
-          <div className="hidden flex-wrap gap-1.5 xl:flex">
-            {EXAMPLE_PROMPTS.map((ex, idx) => (
-              <button
-                key={idx}
-                type="button"
-                onClick={() => setPrompt(ex)}
-                className="rounded-full border px-2.5 py-0.5 text-[11px] opacity-80 transition hover:border-amber-500 hover:opacity-100"
-                style={{
-                  borderColor: 'var(--border-color)',
-                  backgroundColor: 'var(--bg-elevated)',
-                }}
-              >
-                “{ex.slice(0, 26)}…”
-              </button>
-            ))}
-          </div>
-        )}
+
+        {/* FSD v3.1 Section 3.1.1: 일반 노트북/태블릿 뷰포트에서도 예시 칩 상시 노출 */}
+        <div className="flex flex-wrap gap-1.5">
+          {EXAMPLE_PROMPTS.map((ex, idx) => (
+            <button
+              key={idx}
+              type="button"
+              onClick={() => setPrompt(ex)}
+              className="rounded-full border px-2.5 py-0.5 text-[11px] opacity-85 transition hover:border-amber-500 hover:opacity-100"
+              style={{
+                borderColor: 'var(--border-color)',
+                backgroundColor: 'var(--bg-elevated)',
+              }}
+              title={ex}
+            >
+              “{ex.slice(0, compact ? 18 : 26)}…”
+            </button>
+          ))}
+        </div>
       </div>
 
       <form onSubmit={handleSubmit} className="flex flex-col gap-2 sm:flex-row">

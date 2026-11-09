@@ -177,6 +177,77 @@ export const LABELS = {
   } as Record<EdgeProfile, string>,
 };
 
+/**
+ * FSD v3.1 Section 2.2: 한국어 요약 라벨 전용 사전 (의미 왜곡 없는 축약형)
+ */
+export const SHORT_LABELS = {
+  wood_species: {
+    pine: '레드파인',
+    rubber: '러버우드',
+    oak: '화이트오크',
+    walnut: '월넛',
+    ash: '애쉬',
+  } as Record<WoodSpecies, string>,
+  frame_join: {
+    standard: '도미노/목심',
+    dovetail: '주먹장 맞춤',
+    mortise: '통장부 맞춤',
+  } as Record<FrameJoin, string>,
+  reinforcement: {
+    none: '보강 없음',
+    wood_apron: '원목 에이프런',
+    steel_flat: '스틸 평철 매립',
+  } as Record<Reinforcement, string>,
+  shelf_fixing: {
+    fixed: '고정식 짜임',
+    movable: '이동식 다보',
+  } as Record<ShelfFixing, string>,
+};
+
+export function formatShortBaseLabel(
+  type: BaseType,
+  clearanceMm: number,
+): string {
+  if (type === 'floor') return '바닥 밀착';
+  if (type === 'plinth') return `${clearanceMm}mm 걸레받이`;
+  return `${clearanceMm}mm 다리`;
+}
+
+/**
+ * FSD v3.1 Section 3.2.3: 수납 목적별 빠른 내경 가이드
+ */
+export interface StoragePurposeGuide {
+  id: string;
+  label: string;
+  targetNetHeightMm: number;
+  recommendedDepthMm?: number;
+  description: string;
+}
+
+export const STORAGE_PURPOSE_GUIDES: StoragePurposeGuide[] = [
+  {
+    id: 'paperback',
+    label: '📕 단행본/문고본 (내경 220mm)',
+    targetNetHeightMm: 220,
+    recommendedDepthMm: 250,
+    description: '일반 소설, 에세이, 신국판 단행본 수납에 알맞은 높이',
+  },
+  {
+    id: 'a4_magazine',
+    label: '📘 A4 파일/잡지 (내경 315mm)',
+    targetNetHeightMm: 315,
+    recommendedDepthMm: 300,
+    description: 'A4 바인더, 대형 매거진, 전공 서적 수납 기준 높이',
+  },
+  {
+    id: 'lp_artbook',
+    label: '🎵 LP 바이닐/화집 (내경 345mm)',
+    targetNetHeightMm: 345,
+    recommendedDepthMm: 380,
+    description: '12인치 LP 레코드판 및 대형 아트북 수납 필수 높이',
+  },
+];
+
 export const PRESET_DEFINITIONS: PresetDefinition[] = [
   {
     id: 'standard_pine',
@@ -346,7 +417,7 @@ export const PRESET_DEFINITIONS: PresetDefinition[] = [
 
 /**
  * Gemini Structured Output Schema (@google/genai Type definition)
- * FSD Section 6 & Section 8.1
+ * FSD v3.1 Section 6 & Section 8.1
  */
 export const GEMINI_SHELF_RESPONSE_SCHEMA: Schema = {
   type: Type.OBJECT,
@@ -369,6 +440,11 @@ export const GEMINI_SHELF_RESPONSE_SCHEMA: Schema = {
         levels: { type: Type.INTEGER, description: '수납 공간 단수 (1~8단)' },
         thickness_t: { type: Type.INTEGER, description: '판재 두께 (18, 20, 24, 28, 30 중 택1)' },
         vertical_dividers: { type: Type.INTEGER, description: '중간 세로 칸막이 열 수 (0, 1, 2 중 택1)' },
+        custom_shelf_heights_mm: {
+          type: Type.ARRAY,
+          items: { type: Type.INTEGER },
+          description: '단별 비대칭 유효 내경 높이 배열 (선택 사항, 길이 = levels)',
+        },
         custom_shelf_height_note: { type: Type.STRING, description: '단별 높이 특기사항 메모' },
       },
     },

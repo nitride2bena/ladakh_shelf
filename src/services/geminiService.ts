@@ -3,6 +3,7 @@ import {
   WoodShelfSpecificationData,
   GEMINI_SHELF_RESPONSE_SCHEMA,
   LABELS,
+  SHORT_LABELS,
 } from '../types/shelfSchema';
 import {
   normalizeSpecDependencies,
@@ -32,20 +33,29 @@ function getEffectiveApiKey(customKey?: string): string {
 }
 
 /**
- * API 키가 없는 오프라인/로컬 환경에서도 자연어 입력을 분석하여 사양을 즉시 추천하는 스마트 폴백 파서
+ * FSD v3.1 Section 5.2: API 키가 없는 오프라인/로컬 환경에서도
+ * 자기모순 및 정규식 충돌 없이 자연어 입력을 분석하여 사양을 즉시 추천하는 스마트 폴백 파서
  */
 function parsePromptLocally(
   prompt: string,
   currentSpec: Omit<WoodShelfSpecificationData, 'computed_summary' | 'generated_at'>,
+  imageDataUrl?: string | null,
 ): AISpecGenerationResult {
   const text = prompt.toLowerCase();
   const next = structuredClone(currentSpec);
   const reasons: string[] = [];
 
   next.presetType = 'custom';
+  let domainCategory: 'audio' | 'bookshelf' | 'living' | null = null;
 
-  // 용도 키워드 감지
-  if (text.includes('lp') || text.includes('오디오') || text.includes('앰프') || text.includes('턴테이블')) {
+  // 1. 용도별 기본 프로파일 적용
+  if (
+    text.includes('lp') ||
+    text.includes('오디오') ||
+    text.includes('앰프') ||
+    text.includes('턴테이블')
+  ) {
+    domainCategory = 'audio';
     next.dimensions.width_mm = 1200;
     next.dimensions.depth_mm = 450;
     next.dimensions.height_mm = 800;
@@ -54,9 +64,15 @@ function parsePromptLocally(
     next.dimensions.vertical_dividers = 1;
     next.material_joinery.wood_species = 'walnut';
     next.material_joinery.reinforcement = 'steel_flat';
-    next.finishing_hardware.wire_hole_note = '후면 중앙 Ø60mm 오디오 배선 관통 홀';
-    reasons.push('오디오/LP 중량물 수납을 위해 28T 북미산 월넛, 450mm 깊이, 중앙 세로 칸막이 1열 및 스틸 평철 보강을 적용했습니다.');
-  } else if (text.includes('책') || text.includes('서재') || text.includes('북쉘프') || text.includes('a4')) {
+    next.finishing_hardware.wire_hole_note =
+      '후면 중앙 Ø60mm 오디오 배선 관통 홀';
+  } else if (
+    text.includes('책') ||
+    text.includes('서재') ||
+    text.includes('북쉘프') ||
+    text.includes('a4')
+  ) {
+    domainCategory = 'bookshelf';
     next.dimensions.width_mm = 1000;
     next.dimensions.depth_mm = 300;
     next.dimensions.height_mm = 1500;
@@ -64,72 +80,125 @@ function parsePromptLocally(
     next.dimensions.thickness_t = 24;
     next.material_joinery.wood_species = 'oak';
     next.material_joinery.reinforcement = 'steel_flat';
-    reasons.push('도서 하중 지지 및 A4 판형 수납을 위해 화이트오크 24T 두께와 4단 구조, 스틸 평철 매립 보강을 설정했습니다.');
+  } else if (text.includes('장식장') || text.includes('거실')) {
+    domainCategory = 'living';
+    next.dimensions.width_mm = 1000;
+    next.dimensions.depth_mm = 320;
+    next.dimensions.height_mm = 1150;
+    next.dimensions.levels = 3;
+    next.dimensions.thickness_t = 24;
   }
 
-  // 로봇청소기 키워드 감지
-  if (text.includes('로봇') || text.includes('청소기')) {
-    next.base_clearance.type = 'legs';
-    next.base_clearance.clearance_mm = 125;
-    next.base_clearance.leg_style = 'tapered';
-    reasons.push('로봇청소기(기준 110mm 이상)가 여유롭게 통과하도록 125mm 테이퍼드 다리 구조를 적용했습니다.');
-  } else if (text.includes('바닥') || text.includes('밀착') || text.includes('걸레받이')) {
-    if (text.includes('걸레받이')) {
-      next.base_clearance.type = 'plinth';
-      next.base_clearance.clearance_mm = 60;
-      next.base_clearance.skirting_notch = 'standard';
-      reasons.push('먼지 유입을 막고 벽면에 밀착되도록 60mm 걸레받이 박스형 베이스와 표준 노치 가공을 적용했습니다.');
-    } else {
-      next.base_clearance.type = 'floor';
-      next.base_clearance.clearance_mm = 0;
-    }
-  }
-
-  // 수종 키워드 감지
+  // 2. 수종 키워드 명시적 오버라이드
   if (text.includes('월넛') || text.includes('호두')) {
     next.material_joinery.wood_species = 'walnut';
   } else if (text.includes('오크') || text.includes('참나무')) {
     next.material_joinery.wood_species = 'oak';
   } else if (text.includes('애쉬') || text.includes('물푸레')) {
     next.material_joinery.wood_species = 'ash';
-  } else if (text.includes('파인') || text.includes('소나무') || text.includes('가성비')) {
+  } else if (
+    text.includes('파인') ||
+    text.includes('소나무') ||
+    text.includes('가성비')
+  ) {
     next.material_joinery.wood_species = 'pine';
+  } else if (text.includes('러버') || text.includes('고무나무')) {
+    next.material_joinery.wood_species = 'rubber';
   }
 
-  // 숫자 치수 직접 추출 (예: 가로 1400, 높이 900, 5단)
-  const widthMatch = text.match(/(?:가로|폭|w)\s*(\d{3,4})/);
+  // 3. 치수 및 단수 명시적 숫자 추출 (가로 폭 vs 깊이 정규식 분리 - FSD v3.1 Section 5.2)
+  const widthMatch = text.match(/(?:가로|너비|폭|w)\s*(\d{3,4})/);
   if (widthMatch) {
     next.dimensions.width_mm = clamp(Number(widthMatch[1]), 300, 3000);
-    reasons.push(`가로 폭을 ${next.dimensions.width_mm}mm로 반영했습니다.`);
   }
-  const depthMatch = text.match(/(?:깊이|폭|d)\s*(\d{3})/);
+  const depthMatch = text.match(/(?:깊이|세로|안길이|d)\s*(\d{3})/);
   if (depthMatch) {
     next.dimensions.depth_mm = clamp(Number(depthMatch[1]), 150, 800);
   }
   const heightMatch = text.match(/(?:높이|키|h)\s*(\d{3,4})/);
   if (heightMatch) {
     next.dimensions.height_mm = clamp(Number(heightMatch[1]), 300, 2400);
-    reasons.push(`전체 높이를 ${next.dimensions.height_mm}mm로 반영했습니다.`);
   }
   const levelMatch = text.match(/([1-8])\s*단/);
   if (levelMatch) {
     next.dimensions.levels = clamp(Number(levelMatch[1]), 1, 8);
-    reasons.push(`수납 단수를 ${next.dimensions.levels}단으로 설정했습니다.`);
+  }
+
+  // 광폭일 경우 보강 자동 상향
+  if (next.dimensions.width_mm >= 1100 && next.dimensions.thickness_t < 24) {
+    next.dimensions.thickness_t = 24;
+  }
+  if (
+    next.dimensions.width_mm >= 1200 &&
+    next.material_joinery.reinforcement === 'none'
+  ) {
+    next.material_joinery.reinforcement = 'steel_flat';
+  }
+
+  // 4. 하부 구조 및 청소기/걸레받이 키워드 감지
+  let baseReason = '';
+  if (text.includes('로봇') || text.includes('청소기')) {
+    next.base_clearance.type = 'legs';
+    next.base_clearance.clearance_mm = 125;
+    next.base_clearance.leg_style = 'tapered';
+    baseReason =
+      '로봇청소기(기준 110mm 이상)가 여유롭게 통과하도록 125mm 테이퍼드 다리 구조를 적용했습니다.';
+  } else if (
+    text.includes('바닥') ||
+    text.includes('밀착') ||
+    text.includes('걸레받이')
+  ) {
+    if (text.includes('걸레받이') || text.includes('노치')) {
+      next.base_clearance.type = 'plinth';
+      next.base_clearance.clearance_mm = 60;
+      next.base_clearance.skirting_notch = 'standard';
+      baseReason =
+        '먼지 유입을 막고 벽면에 밀착되도록 60mm 걸레받이 박스형 베이스와 표준 노치 가공(12×75mm)을 적용했습니다.';
+    } else {
+      next.base_clearance.type = 'floor';
+      next.base_clearance.clearance_mm = 0;
+      baseReason = '진동 억제 및 먼지 차단을 위해 바닥 밀착형 구조를 적용했습니다.';
+    }
   }
 
   const normalized = normalizeSpecDependencies(next);
+  const woodLabel = SHORT_LABELS.wood_species[normalized.material_joinery.wood_species];
+  const reinfLabel = SHORT_LABELS.reinforcement[normalized.material_joinery.reinforcement];
+
+  // 5. 최종 확정된 파라미터 기준으로 모순 없는 단일 사유 문장 조합
+  if (domainCategory === 'audio') {
+    reasons.push(
+      `오디오·LP 중량물 수납을 위해 외경 ${normalized.dimensions.width_mm}×${normalized.dimensions.depth_mm}×${normalized.dimensions.height_mm}mm (${normalized.dimensions.levels}단), ${normalized.dimensions.thickness_t}T ${woodLabel}, 중앙 세로 칸막이 ${normalized.dimensions.vertical_dividers}열 및 ${reinfLabel} 보강을 설정했습니다.`,
+    );
+  } else if (domainCategory === 'bookshelf') {
+    reasons.push(
+      `도서 하중 지지 및 서재 수납을 위해 외경 ${normalized.dimensions.width_mm}×${normalized.dimensions.depth_mm}×${normalized.dimensions.height_mm}mm (${normalized.dimensions.levels}단), ${woodLabel} ${normalized.dimensions.thickness_t}T 두께 및 ${reinfLabel} 보강을 설정했습니다.`,
+    );
+  } else {
+    reasons.push(
+      `요청하신 조건에 맞춰 외경 ${normalized.dimensions.width_mm}×${normalized.dimensions.depth_mm}×${normalized.dimensions.height_mm}mm (${normalized.dimensions.levels}단), ${woodLabel} ${normalized.dimensions.thickness_t}T(${reinfLabel}) 사양으로 구성했습니다.`,
+    );
+  }
+
+  if (baseReason) {
+    reasons.push(baseReason);
+  }
+
+  if (imageDataUrl) {
+    reasons.push(
+      '(참고: 첨부된 공간 사진의 정밀 시각 분석을 위해서는 상단 [API 키 설정]에서 Gemini API 키 입력이 필요합니다. 현재는 텍스트 규칙 기반으로 사양을 설정했습니다.)',
+    );
+  }
+
   return {
     updatedSpec: normalized,
-    reasoning:
-      reasons.length > 0
-        ? `[스마트 룰 엔진 적용] ${reasons.join(' ')}`
-        : '[스마트 룰 엔진 적용] 입력하신 요구사항을 바탕으로 구조적 균형에 맞게 사양을 조정했습니다. (상단 API 키 설정 시 Gemini 2.5 Flash 정밀 멀티모달 분석이 활성화됩니다.)',
+    reasoning: `[스마트 룰 엔진 적용] ${reasons.join(' ')}`,
     usedFallback: true,
   };
 }
 
 /**
- * FSD Section 5.1 & 8.1: 자연어 및 공간 사진 기반 사양 자동 생성 (Gemini Structured Outputs)
+ * FSD v3.1 Section 5.1 & 8.1: 자연어 및 공간 사진 기반 사양 자동 생성 (Gemini Structured Outputs)
  */
 export async function generateShelfSpecFromPrompt(
   prompt: string,
@@ -139,7 +208,7 @@ export async function generateShelfSpecFromPrompt(
 ): Promise<AISpecGenerationResult> {
   const apiKey = getEffectiveApiKey(customApiKey);
   if (!apiKey) {
-    return parsePromptLocally(prompt, currentSpec);
+    return parsePromptLocally(prompt, currentSpec, imageDataUrl);
   }
 
   try {
@@ -188,6 +257,14 @@ export async function generateShelfSpecFromPrompt(
     const rawText = response.text || '{}';
     const parsed = JSON.parse(rawText);
 
+    const parsedCustomHeights = Array.isArray(
+      parsed.dimensions?.custom_shelf_heights_mm,
+    )
+      ? parsed.dimensions.custom_shelf_heights_mm
+          .map((n: unknown) => Math.max(100, Math.round(Number(n) || 100)))
+          .filter((n: number) => !Number.isNaN(n))
+      : undefined;
+
     const merged: Omit<WoodShelfSpecificationData, 'computed_summary' | 'generated_at'> = {
       client: parsed.client || currentSpec.client || 'AI 맞춤 설계 프로젝트',
       presetType: 'custom',
@@ -199,6 +276,9 @@ export async function generateShelfSpecFromPrompt(
         levels: clamp(Number(parsed.dimensions?.levels ?? currentSpec.dimensions.levels), 1, 8),
         thickness_t: sanitizeThickness(Number(parsed.dimensions?.thickness_t ?? currentSpec.dimensions.thickness_t)),
         vertical_dividers: sanitizeVerticalDividers(Number(parsed.dimensions?.vertical_dividers ?? currentSpec.dimensions.vertical_dividers)),
+        ...(parsedCustomHeights && parsedCustomHeights.length > 0
+          ? { custom_shelf_heights_mm: parsedCustomHeights }
+          : {}),
         custom_shelf_height_note:
           parsed.dimensions?.custom_shelf_height_note ??
           currentSpec.dimensions.custom_shelf_height_note ??
@@ -261,12 +341,12 @@ export async function generateShelfSpecFromPrompt(
     };
   } catch (err) {
     console.warn('Gemini API 호출 실패, 로컬 폴백 파서로 전환합니다:', err);
-    return parsePromptLocally(prompt, currentSpec);
+    return parsePromptLocally(prompt, currentSpec, imageDataUrl);
   }
 }
 
 /**
- * FSD Section 5.2: Step 3 AI 목공 전문가 감리 코멘트 생성
+ * FSD v3.1 Section 5.3: Step 3 AI 목공 전문가 감리 코멘트 생성
  */
 export async function generateExpertReviewComment(
   fullSpec: WoodShelfSpecificationData,

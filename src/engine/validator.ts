@@ -10,7 +10,96 @@ export interface ValidationResult {
 }
 
 /**
- * FSD Section 3.3.1: 옵션 종속성(Dependency) 자동 보정 규칙
+ * FSD v3.1 Section 3.2.3: 비대칭 단 높이 자동 잔여 분배 (Auto-Balance)
+ * 특정 단(changedIdx)의 높이를 변경했을 때 잠금(lockedIndices)되지 않은 나머지 단들에
+ * 전체 유효 내경(innerTotalHeightMm)을 최소 100mm 보장하며 균등 분배한다.
+ */
+export function autoBalanceShelfHeights(
+  currentHeights: number[],
+  changedIdx: number,
+  newValue: number,
+  lockedIndices: number[],
+  innerTotalHeightMm: number,
+): number[] {
+  const N = currentHeights.length;
+  if (N <= 1) {
+    return [Math.max(100, innerTotalHeightMm)];
+  }
+
+  const next = [...currentHeights];
+  // 변경하려는 단 이외의 잠금된 단들 합계
+  const otherLockedIndices = lockedIndices.filter((idx) => idx !== changedIdx && idx >= 0 && idx < N);
+  const unlockedOtherIndices = Array.from({ length: N }, (_, i) => i).filter(
+    (i) => i !== changedIdx && !otherLockedIndices.includes(i),
+  );
+
+  if (unlockedOtherIndices.length === 0) {
+    // 다른 모든 단이 잠겨있으면 변경된 단이 잔여 높이를 흡수
+    const otherSum = otherLockedIndices.reduce((acc, idx) => acc + next[idx], 0);
+    next[changedIdx] = Math.max(100, innerTotalHeightMm - otherSum);
+    return next;
+  }
+
+  const lockedSum = otherLockedIndices.reduce((acc, idx) => acc + next[idx], 0);
+  const minRequiredForUnlocked = unlockedOtherIndices.length * 100;
+  const maxAllowedForChanged = Math.max(
+    100,
+    innerTotalHeightMm - lockedSum - minRequiredForUnlocked,
+  );
+
+  const clampedNewVal = Math.min(Math.max(100, Math.round(newValue)), maxAllowedForChanged);
+  next[changedIdx] = clampedNewVal;
+
+  const remaining = Math.max(
+    minRequiredForUnlocked,
+    innerTotalHeightMm - lockedSum - clampedNewVal,
+  );
+  const baseShare = Math.floor(remaining / unlockedOtherIndices.length);
+  let remainder = remaining - baseShare * unlockedOtherIndices.length;
+
+  for (const idx of unlockedOtherIndices) {
+    next[idx] = baseShare + (remainder > 0 ? 1 : 0);
+    if (remainder > 0) remainder--;
+  }
+
+  return next;
+}
+
+/**
+ * 비대칭 단 높이의 현재 오차를 잠기지 않은 단들에 즉시 분배하여 합계를 innerTotalHeightMm에 맞춘다.
+ */
+export function distributeRemainingHeight(
+  currentHeights: number[],
+  lockedIndices: number[],
+  innerTotalHeightMm: number,
+): number[] {
+  const N = currentHeights.length;
+  if (N === 0) return [];
+  const next = [...currentHeights];
+  const validLocked = lockedIndices.filter((i) => i >= 0 && i < N);
+  const unlocked = Array.from({ length: N }, (_, i) => i).filter(
+    (i) => !validLocked.includes(i),
+  );
+
+  const targetIndices = unlocked.length > 0 ? unlocked : Array.from({ length: N }, (_, i) => i);
+  const fixedSum = Array.from({ length: N }, (_, i) => i)
+    .filter((i) => !targetIndices.includes(i))
+    .reduce((acc, i) => acc + next[i], 0);
+
+  const remaining = Math.max(targetIndices.length * 100, innerTotalHeightMm - fixedSum);
+  const avg = Math.floor(remaining / targetIndices.length);
+  let rem = remaining - avg * targetIndices.length;
+
+  for (const idx of targetIndices) {
+    next[idx] = avg + (rem > 0 ? 1 : 0);
+    if (rem > 0) rem--;
+  }
+
+  return next;
+}
+
+/**
+ * FSD v3.1 Section 3.3.1: 옵션 종속성(Dependency) 자동 보정 규칙
  */
 export function normalizeSpecDependencies(
   draft: Omit<WoodShelfSpecificationData, 'computed_summary' | 'generated_at'>,
@@ -74,7 +163,7 @@ export function normalizeSpecDependencies(
 }
 
 /**
- * FSD Section 3.3.2: 물리적/구조적 한계 진단 (Structural Health Check)
+ * FSD v3.1 Section 3.3.2: 물리적/구조적 한계 진단 (Structural Health Check)
  */
 export function validateShelfStructure(
   spec: Omit<WoodShelfSpecificationData, 'computed_summary' | 'generated_at'>,

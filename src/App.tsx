@@ -24,27 +24,92 @@ const FONT_SIZE_MAP: Record<FontScaleStep, string> = {
   large: '17px',
 };
 
-export const App: React.FC = () => {
-  // 전역 시스템 테마 및 글자 크기 상태 (FSD Section 2.1)
-  const [theme, setTheme] = useState<ThemeMode>('dark');
-  const [fontScale, setFontScale] = useState<FontScaleStep>('default');
-  const [currentStep, setCurrentStep] = useState<1 | 2 | 3>(1);
+const STORAGE_KEYS = {
+  THEME: 'WOOD_SHELF_THEME',
+  FONT_SCALE: 'WOOD_SHELF_FONT_SCALE',
+  DRAFT_SPEC: 'WOOD_SHELF_DRAFT_SPEC_V31',
+  API_KEY: 'WOOD_SHELF_GEMINI_API_KEY',
+};
 
-  // Step 1에서 선택 중인 카드 ID
-  const [selectedPresetCardId, setSelectedPresetCardId] =
-    useState<PresetDefinition['id']>('standard_pine');
+function loadInitialSpec(): Omit<
+  WoodShelfSpecificationData,
+  'computed_summary' | 'generated_at'
+> {
+  if (typeof window !== 'undefined') {
+    // 1. URL 공유 파라미터(?spec=...) 우선 확인
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const encoded = params.get('spec');
+      if (encoded) {
+        const decoded = JSON.parse(decodeURIComponent(atob(encoded)));
+        if (decoded && decoded.dimensions && decoded.base_clearance) {
+          return normalizeSpecDependencies(decoded);
+        }
+      }
+    } catch {
+      // 잘못된 URL 파라미터 무시
+    }
+
+    // 2. localStorage 자동 백업 사양 복원
+    try {
+      const saved = window.localStorage.getItem(STORAGE_KEYS.DRAFT_SPEC);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && parsed.dimensions && parsed.base_clearance) {
+          return normalizeSpecDependencies(parsed);
+        }
+      }
+    } catch {
+      // 파싱 실패 시 기본 프리셋 사용
+    }
+  }
+  return structuredClone(PRESET_DEFINITIONS[0].spec);
+}
+
+export const App: React.FC = () => {
+  // 전역 시스템 테마 및 글자 크기 상태 (FSD v3.1 Section 2.1 영속화)
+  const [theme, setTheme] = useState<ThemeMode>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = window.localStorage.getItem(STORAGE_KEYS.THEME);
+      if (saved === 'light' || saved === 'dark') return saved;
+    }
+    return 'dark';
+  });
+
+  const [fontScale, setFontScale] = useState<FontScaleStep>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = window.localStorage.getItem(STORAGE_KEYS.FONT_SCALE);
+      if (saved === 'small' || saved === 'default' || saved === 'large') {
+        return saved;
+      }
+    }
+    return 'default';
+  });
 
   // 단일 진실 공급원(Single Source of Truth) 사양 상태
   const [coreSpec, setCoreSpec] = useState<
     Omit<WoodShelfSpecificationData, 'computed_summary' | 'generated_at'>
-  >(() => structuredClone(PRESET_DEFINITIONS[0].spec));
+  >(loadInitialSpec);
+
+  const [currentStep, setCurrentStep] = useState<1 | 2 | 3>(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('spec')) return 2;
+    }
+    return 1;
+  });
+
+  // Step 1에서 선택 중인 카드 ID (기반 프리셋과 초기 동기화)
+  const [selectedPresetCardId, setSelectedPresetCardId] = useState<
+    PresetDefinition['id']
+  >(() => coreSpec.basePresetOrigin || 'standard_pine');
 
   const [aiReviewComment, setAiReviewComment] = useState<string>('');
   const [isAILoading, setIsAILoading] = useState(false);
   const [isGeneratingReview, setIsGeneratingReview] = useState(false);
   const [lastAIReasoning, setLastAIReasoning] = useState<string | null>(null);
 
-  // 프리셋 덮어쓰기 확인 모달 (FSD Section 3.1.3 작업 내역 보호)
+  // 프리셋 덮어쓰기 확인 모달 (FSD v3.1 Section 3.1.3 작업 내역 완벽 보호)
   const [pendingPresetToConfirm, setPendingPresetToConfirm] =
     useState<PresetDefinition | null>(null);
 
@@ -52,23 +117,39 @@ export const App: React.FC = () => {
   const [isApiKeyModalOpen, setIsApiKeyModalOpen] = useState(false);
   const [customApiKey, setCustomApiKey] = useState<string>(() => {
     if (typeof window !== 'undefined') {
-      return window.localStorage.getItem('WOOD_SHELF_GEMINI_API_KEY') || '';
+      return window.localStorage.getItem(STORAGE_KEYS.API_KEY) || '';
     }
     return '';
   });
 
-  // 테마 동기화
+  // 테마 동기화 및 영속화
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(STORAGE_KEYS.THEME, theme);
+    }
   }, [theme]);
 
-  // 폰트 스케일링 동기화
+  // 폰트 스케일링 동기화 및 영속화
   useEffect(() => {
     document.documentElement.style.setProperty(
       '--app-font-size',
       FONT_SIZE_MAP[fontScale],
     );
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(STORAGE_KEYS.FONT_SCALE, fontScale);
+    }
   }, [fontScale]);
+
+  // 편집 사양 localStorage 자동 백업
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(
+        STORAGE_KEYS.DRAFT_SPEC,
+        JSON.stringify(coreSpec),
+      );
+    }
+  }, [coreSpec]);
 
   // 60fps 즉시 파생 계산 (Deterministic Core Engine)
   const computedSummary = useMemo(
@@ -90,7 +171,15 @@ export const App: React.FC = () => {
     customApiKey.trim() || process.env.GEMINI_API_KEY || process.env.API_KEY,
   );
 
-  // Step 1에서 프리셋 확정 시
+  // Step 1로 이동할 때 현재 사양의 원본 프리셋 카드로 포커스 동기화
+  const handleSelectStep = (step: 1 | 2 | 3) => {
+    if (step === 1 && coreSpec.basePresetOrigin) {
+      setSelectedPresetCardId(coreSpec.basePresetOrigin);
+    }
+    setCurrentStep(step);
+  };
+
+  // Step 1에서 프리셋 기본값으로 확정 시
   const applyPresetDirectly = (preset: PresetDefinition) => {
     setSelectedPresetCardId(preset.id);
     setCoreSpec(structuredClone(preset.spec));
@@ -100,18 +189,19 @@ export const App: React.FC = () => {
     setPendingPresetToConfirm(null);
   };
 
+  /**
+   * FSD v3.1 Section 3.1.3: 커스텀 사양이 존재할 경우(동일 원본 프리셋 포함)
+   * 예외 없이 초기화 확인 모달을 표시하여 작업 유실을 방지한다.
+   */
   const handleConfirmPresetFromStep1 = (preset: PresetDefinition) => {
-    if (
-      coreSpec.presetType === 'custom' &&
-      coreSpec.basePresetOrigin !== preset.id
-    ) {
+    if (coreSpec.presetType === 'custom') {
       setPendingPresetToConfirm(preset);
       return;
     }
     applyPresetDirectly(preset);
   };
 
-  // Step 2에서 사양 수정 시 자동으로 presetType = "custom" 전환 (FSD Section 3.1.3)
+  // Step 2에서 사양 수정 시 자동으로 presetType = "custom" 전환
   const handleUpdateSpec = (
     updater: (
       prev: Omit<WoodShelfSpecificationData, 'computed_summary' | 'generated_at'>,
@@ -178,10 +268,7 @@ export const App: React.FC = () => {
   const handleSaveApiKey = (e: React.FormEvent) => {
     e.preventDefault();
     if (typeof window !== 'undefined') {
-      window.localStorage.setItem(
-        'WOOD_SHELF_GEMINI_API_KEY',
-        customApiKey.trim(),
-      );
+      window.localStorage.setItem(STORAGE_KEYS.API_KEY, customApiKey.trim());
     }
     setIsApiKeyModalOpen(false);
   };
@@ -190,7 +277,7 @@ export const App: React.FC = () => {
     <div className="min-h-screen">
       <HeaderBar
         currentStep={currentStep}
-        onSelectStep={(s) => setCurrentStep(s)}
+        onSelectStep={handleSelectStep}
         canProceedToStep3={computedSummary.errors.length === 0}
         theme={theme}
         onToggleTheme={() =>
@@ -208,6 +295,10 @@ export const App: React.FC = () => {
             selectedPresetId={selectedPresetCardId}
             onSelectPresetCard={setSelectedPresetCardId}
             onConfirmPresetAndContinue={handleConfirmPresetFromStep1}
+            onContinueCustomEdit={() => setCurrentStep(2)}
+            isCustomActive={coreSpec.presetType === 'custom'}
+            customOriginId={coreSpec.basePresetOrigin}
+            theme={theme}
             onApplyAIPrompt={handleApplyAIPrompt}
             isAILoading={isAILoading}
             lastAIReasoning={lastAIReasoning}
@@ -217,6 +308,7 @@ export const App: React.FC = () => {
         {currentStep === 2 && (
           <Step2ConfigView
             spec={fullSpec}
+            theme={theme}
             onUpdateSpec={handleUpdateSpec}
             onResetToOriginPreset={handleResetToOriginPreset}
             onProceedToStep3={() => setCurrentStep(3)}
@@ -229,6 +321,7 @@ export const App: React.FC = () => {
         {currentStep === 3 && (
           <Step3ExportView
             spec={fullSpec}
+            theme={theme}
             onBackToStep2={() => setCurrentStep(2)}
             onGenerateAIReview={handleGenerateAIReview}
             isGeneratingReview={isGeneratingReview}
@@ -236,7 +329,7 @@ export const App: React.FC = () => {
         )}
       </main>
 
-      {/* 프리셋 덮어쓰기 확인 모달 (FSD Section 3.1.3) */}
+      {/* 프리셋 덮어쓰기 확인 모달 (FSD v3.1 Section 3.1.3) */}
       {pendingPresetToConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
           <div
@@ -250,31 +343,39 @@ export const App: React.FC = () => {
               <AlertTriangle className="h-5 w-5" />
               <h3 className="text-base font-bold">커스텀 사양 초기화 확인</h3>
             </div>
-            <p className="mt-2.5 text-xs leading-relaxed" style={{ color: 'var(--text-muted)' }}>
-              현재 Step 2에서 수정한 커스텀 사양이 있습니다.{' '}
+            <p
+              className="mt-2.5 text-xs leading-relaxed"
+              style={{ color: 'var(--text-muted)' }}
+            >
+              현재 수정 중인 커스텀 사양({coreSpec.dimensions.width_mm}×
+              {coreSpec.dimensions.depth_mm}×{coreSpec.dimensions.height_mm}mm,{' '}
+              {coreSpec.dimensions.levels}단)이 있습니다.{' '}
               <strong style={{ color: 'var(--text-main)' }}>
                 [{pendingPresetToConfirm.title}]
               </strong>{' '}
-              프리셋을 새로 불러오면 기존에 수정한 사양이 초기화됩니다. 변경하시겠습니까?
+              기본 사양을 새로 불러오면 기존에 수정한 커스텀 내역이 초기화됩니다.
             </p>
-            <div className="mt-5 flex justify-end gap-2">
+            <div className="mt-5 flex flex-wrap justify-end gap-2">
               <button
                 type="button"
-                onClick={() => setPendingPresetToConfirm(null)}
-                className="rounded-lg border px-3.5 py-2 text-xs font-semibold"
+                onClick={() => {
+                  setPendingPresetToConfirm(null);
+                  setCurrentStep(2);
+                }}
+                className="rounded-lg border px-3.5 py-2 text-xs font-semibold transition hover:border-emerald-500"
                 style={{
                   borderColor: 'var(--border-color)',
                   backgroundColor: 'var(--bg-elevated)',
                 }}
               >
-                취소 (기존 커스텀 유지)
+                기존 커스텀 이어서 편집 (Step 2)
               </button>
               <button
                 type="button"
                 onClick={() => applyPresetDirectly(pendingPresetToConfirm)}
                 className="rounded-lg bg-amber-600 px-4 py-2 text-xs font-bold text-white hover:bg-amber-500"
               >
-                프리셋 덮어쓰기
+                프리셋 기본값으로 초기화
               </button>
             </div>
           </div>
@@ -308,7 +409,10 @@ export const App: React.FC = () => {
               </button>
             </div>
 
-            <p className="mt-2 text-xs leading-relaxed" style={{ color: 'var(--text-muted)' }}>
+            <p
+              className="mt-2 text-xs leading-relaxed"
+              style={{ color: 'var(--text-muted)' }}
+            >
               Google AI Studio에서 발급받은 Gemini API 키를 입력하면{' '}
               <code>gemini-2.5-flash</code> 기반 자연어 사양 설계, 실내 공간 사진 멀티모달 분석, 전문가 감리 리포트가 활성화됩니다. (미입력 시에도 내장 스마트 룰 엔진과 60fps 실시간 도면은 100% 정상 작동합니다.)
             </p>

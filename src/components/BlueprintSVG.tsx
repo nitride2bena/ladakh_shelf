@@ -3,8 +3,15 @@ import {
   WoodShelfSpecificationData,
   WOOD_COLORS,
   LABELS,
+  ThemeMode,
 } from '../types/shelfSchema';
 import { computeBlueprintMetrics } from '../engine/calculator';
+
+export type BlueprintInteractiveSection =
+  | 'dimensions'
+  | 'base'
+  | 'material'
+  | 'finishing';
 
 interface BlueprintSVGProps {
   spec: Pick<
@@ -13,16 +20,23 @@ interface BlueprintSVGProps {
   >;
   netShelfHeightMm: number;
   svgRef?: React.RefObject<SVGSVGElement | null>;
+  theme?: ThemeMode;
+  onSelectSection?: (
+    section: BlueprintInteractiveSection,
+    openDrawer?: boolean,
+  ) => void;
 }
 
 /**
- * FSD Section 4.1 & 4.3: 반응형 듀얼 뷰포트(정면도 + 측면도) SVG 도면 엔진
- * viewBox="0 0 520 320"
+ * FSD v3.1 Section 4.1 & 4.3: 안전 여백(Safe Padding) 보장 및 양방향 인터랙티브 듀얼 뷰포트 SVG 도면 엔진
+ * viewBox="0 0 540 330"
  */
 export const BlueprintSVG: React.FC<BlueprintSVGProps> = ({
   spec,
   netShelfHeightMm,
   svgRef,
+  theme = 'dark',
+  onSelectSection,
 }) => {
   const metrics = computeBlueprintMetrics(spec);
   const {
@@ -49,28 +63,39 @@ export const BlueprintSVG: React.FC<BlueprintSVGProps> = ({
     spec.base_clearance;
   const { wood_species, reinforcement, backpanel } = spec.material_joinery;
 
-  const woodColor = WOOD_COLORS[wood_species] || '#d4a373';
-  const floorY = 278; // 바닥 기준선 Y좌표
+  const isLight = theme === 'light';
+  const bgFill = isLight ? '#f8fafc' : '#0f1318';
+  const gridStroke = isLight ? '#e2e8f0' : '#1e293b';
+  const titleFill = isLight ? '#475569' : '#94a3b8';
+  const floorStroke = isLight ? '#64748b' : '#475569';
+  const dimStroke = isLight ? '#0284c7' : '#38bdf8';
+  const innerDimColor = isLight ? '#d97706' : '#fbbf24';
+  const baseDimColor = isLight ? '#059669' : '#34d399';
+  const frameStroke = isLight ? '#334155' : '#0f172a';
 
-  // 정면도(Front View) 배치 좌표 (좌측 영역 X: 30 ~ 330)
-  const frontCenterX = 175;
+  const woodColor = WOOD_COLORS[wood_species] || '#d4a373';
+  const floorY = 286; // 바닥 기준선 Y좌표 (FSD v3.1 Section 4.1)
+
+  // 정면도(Front View) 배치 좌표 (중심 X = 190, 최대 폭 260 -> 좌측 최소 X = 60)
+  const frontCenterX = 190;
   const frontX = frontCenterX - w_svg / 2;
   const frontTopY = floorY - h_svg;
 
-  // 측면도(Side View) 배치 좌표 (우측 영역 X: 355 ~ 495)
-  const sideCenterX = 425;
+  // 측면도(Side View) 배치 좌표 (중심 X = 445, 최대 폭 115 -> 좌측 최소 X = 387.5)
+  const sideCenterX = 445;
   const sideX = sideCenterX - d_svg / 2;
   const sideTopY = floorY - h_svg;
+
+  const hasCustomHeights =
+    Array.isArray(custom_shelf_heights_mm) &&
+    custom_shelf_heights_mm.length === N &&
+    custom_shelf_heights_mm.reduce((a, b) => a + b, 0) > 0;
 
   // 각 선반 판재의 Y 위치 계산 (상판 = frontTopY, 하판 = frontTopY + h_frame_svg - t_svg)
   const shelfYPositions: number[] = [];
   const innerAvailableSvg = Math.max(h_frame_svg - t_svg * (N + 1), 0);
 
-  if (
-    custom_shelf_heights_mm &&
-    custom_shelf_heights_mm.length === N &&
-    custom_shelf_heights_mm.reduce((a, b) => a + b, 0) > 0
-  ) {
+  if (hasCustomHeights && custom_shelf_heights_mm) {
     const totalCustom = custom_shelf_heights_mm.reduce((a, b) => a + b, 0);
     let cursorY = frontTopY;
     shelfYPositions.push(cursorY); // 최상판
@@ -118,13 +143,17 @@ export const BlueprintSVG: React.FC<BlueprintSVGProps> = ({
         ? Math.max(75 * scale, 8)
         : 0;
 
+  const interactiveClass = onSelectSection
+    ? 'cursor-pointer transition-opacity hover:opacity-80'
+    : '';
+
   return (
     <svg
       ref={svgRef}
-      viewBox="0 0 520 320"
+      viewBox="0 0 540 330"
       className="h-auto w-full select-none rounded-lg border"
       style={{
-        backgroundColor: '#0f1318',
+        backgroundColor: bgFill,
         borderColor: 'var(--border-color)',
       }}
       xmlns="http://www.w3.org/2000/svg"
@@ -139,21 +168,21 @@ export const BlueprintSVG: React.FC<BlueprintSVGProps> = ({
           <path
             d="M 20 0 L 0 0 0 20"
             fill="none"
-            stroke="#1e293b"
+            stroke={gridStroke}
             strokeWidth="0.6"
           />
         </pattern>
       </defs>
 
       {/* 배경 그리드 */}
-      <rect width="520" height="320" fill="url(#blueprint-grid)" />
+      <rect width="540" height="330" fill="url(#blueprint-grid)" />
 
-      {/* 상단 뷰 타이틀 */}
+      {/* 상단 뷰 타이틀 (y=16 고정, 치수선 y>=47과 최소 31px 안전 여백 확보) */}
       <text
         x={frontCenterX}
-        y={18}
+        y={16}
         textAnchor="middle"
-        fill="#94a3b8"
+        fill={titleFill}
         fontSize="10"
         fontWeight="600"
       >
@@ -161,9 +190,9 @@ export const BlueprintSVG: React.FC<BlueprintSVGProps> = ({
       </text>
       <text
         x={sideCenterX}
-        y={18}
+        y={16}
         textAnchor="middle"
-        fill="#94a3b8"
+        fill={titleFill}
         fontSize="10"
         fontWeight="600"
       >
@@ -172,15 +201,15 @@ export const BlueprintSVG: React.FC<BlueprintSVGProps> = ({
 
       {/* 바닥 기준선 (Floor Line) */}
       <line
-        x1="20"
+        x1="18"
         y1={floorY}
-        x2="500"
+        x2="516"
         y2={floorY}
-        stroke="#475569"
+        stroke={floorStroke}
         strokeWidth="1.2"
         strokeDasharray="4 2"
       />
-      <text x="502" y={floorY + 3} fill="#64748b" fontSize="8">
+      <text x="519" y={floorY + 3} fill={titleFill} fontSize="8">
         FL
       </text>
 
@@ -195,11 +224,19 @@ export const BlueprintSVG: React.FC<BlueprintSVGProps> = ({
           height={Math.max(h_frame_svg - 2 * t_svg, 0)}
           fill={woodColor}
           fillOpacity={0.26}
-        />
+          className={interactiveClass}
+          onClick={() => onSelectSection?.('dimensions', true)}
+        >
+          <title>5T 동수종 무늬목 합판 백패널 (클릭하여 특주 옵션 편집)</title>
+        </rect>
       )}
 
       {backpanel === 'solid_louver' && (
-        <g>
+        <g
+          className={interactiveClass}
+          onClick={() => onSelectSection?.('dimensions', true)}
+        >
+          <title>솔리드 원목 루바 백패널 (클릭하여 특주 옵션 편집)</title>
           <rect
             x={frontX + t_svg}
             y={frontTopY + t_svg}
@@ -230,7 +267,14 @@ export const BlueprintSVG: React.FC<BlueprintSVGProps> = ({
       )}
 
       {backpanel === 'brass_cross' && (
-        <g stroke="#d4af37" strokeWidth="1.5" strokeDasharray="4 3">
+        <g
+          stroke="#d4af37"
+          strokeWidth="1.5"
+          strokeDasharray="4 3"
+          className={interactiveClass}
+          onClick={() => onSelectSection?.('dimensions', true)}
+        >
+          <title>황동 강선 X자 브레이싱 (클릭하여 특주 옵션 편집)</title>
           <line
             x1={frontX + t_svg}
             y1={frontTopY + t_svg}
@@ -247,24 +291,32 @@ export const BlueprintSVG: React.FC<BlueprintSVGProps> = ({
       )}
 
       {/* 1-B. 좌/우 외측판 (Side Panels) */}
-      <rect
-        x={frontX}
-        y={frontTopY}
-        width={t_svg}
-        height={h_frame_svg}
-        fill={woodColor}
-        stroke="#1e293b"
-        strokeWidth="0.6"
-      />
-      <rect
-        x={frontX + w_svg - t_svg}
-        y={frontTopY}
-        width={t_svg}
-        height={h_frame_svg}
-        fill={woodColor}
-        stroke="#1e293b"
-        strokeWidth="0.6"
-      />
+      <g
+        className={interactiveClass}
+        onClick={() => onSelectSection?.('material', false)}
+      >
+        <title>
+          {LABELS.wood_species[wood_species]} {T}T 측판 (클릭하여 수종/구조 설정)
+        </title>
+        <rect
+          x={frontX}
+          y={frontTopY}
+          width={t_svg}
+          height={h_frame_svg}
+          fill={woodColor}
+          stroke={frameStroke}
+          strokeWidth="0.6"
+        />
+        <rect
+          x={frontX + w_svg - t_svg}
+          y={frontTopY}
+          width={t_svg}
+          height={h_frame_svg}
+          fill={woodColor}
+          stroke={frameStroke}
+          strokeWidth="0.6"
+        />
+      </g>
 
       {/* 1-C. 중간 세로 칸막이 (Vertical Dividers) */}
       {dividerXPositions.map((dx, i) => (
@@ -276,24 +328,35 @@ export const BlueprintSVG: React.FC<BlueprintSVGProps> = ({
           height={Math.max(h_frame_svg - 2 * t_svg, 0)}
           fill={woodColor}
           fillOpacity={0.92}
-          stroke="#1e293b"
+          stroke={frameStroke}
           strokeWidth="0.5"
-        />
+          className={interactiveClass}
+          onClick={() => onSelectSection?.('dimensions', true)}
+        >
+          <title>중간 세로 칸막이 {i + 1}열 (클릭하여 특주 옵션 편집)</title>
+        </rect>
       ))}
 
       {/* 1-D. 가로 선반 판재 (N + 1 매) 및 하중 보강재 */}
       {shelfYPositions.map((sy, idx) => (
-        <g key={idx}>
+        <g
+          key={idx}
+          className={interactiveClass}
+          onClick={() => onSelectSection?.('material', reinforcement !== 'none')}
+        >
+          <title>
+            가로 선반 판재 ({T}T) {reinforcement !== 'none' ? `+ ${LABELS.reinforcement[reinforcement]}` : ''}
+          </title>
           <rect
             x={frontX}
             y={sy}
             width={w_svg}
             height={t_svg}
             fill={woodColor}
-            stroke="#0f172a"
+            stroke={frameStroke}
             strokeWidth="0.7"
           />
-          {/* 하중 보강재 렌더링 (최하판 제외 또는 전 선반 적용) */}
+          {/* 하중 보강재 렌더링 (최하판 제외) */}
           {idx < shelfYPositions.length - 1 &&
             reinforcement === 'steel_flat' && (
               <line
@@ -314,7 +377,7 @@ export const BlueprintSVG: React.FC<BlueprintSVGProps> = ({
                 height={3.8}
                 fill={woodColor}
                 fillOpacity={0.82}
-                stroke="#0f172a"
+                stroke={frameStroke}
                 strokeWidth="0.4"
               />
             )}
@@ -323,21 +386,23 @@ export const BlueprintSVG: React.FC<BlueprintSVGProps> = ({
 
       {/* 1-E. 하부 베이스 구조 (legs / plinth / floor) */}
       {baseType === 'legs' && h_base_svg > 0 && (
-        <g>
+        <g
+          className={interactiveClass}
+          onClick={() => onSelectSection?.('base', false)}
+        >
+          <title>하부 다리 ({clearance_mm}mm) - 클릭하여 하부 공간 설정</title>
           {leg_style === 'tapered' ? (
             <>
-              {/* 좌측 테이퍼드 다리 */}
               <polygon
                 points={`${frontX + 2},${frameBottomY} ${frontX + 2 + legWidthSvg},${frameBottomY} ${frontX + 2 + legWidthSvg * 0.65},${floorY} ${frontX + 2 + legWidthSvg * 0.15},${floorY}`}
                 fill={woodColor}
-                stroke="#0f172a"
+                stroke={frameStroke}
                 strokeWidth="0.6"
               />
-              {/* 우측 테이퍼드 다리 */}
               <polygon
                 points={`${frontX + w_svg - 2 - legWidthSvg},${frameBottomY} ${frontX + w_svg - 2},${frameBottomY} ${frontX + w_svg - 2 - legWidthSvg * 0.15},${floorY} ${frontX + w_svg - 2 - legWidthSvg * 0.65},${floorY}`}
                 fill={woodColor}
-                stroke="#0f172a"
+                stroke={frameStroke}
                 strokeWidth="0.6"
               />
             </>
@@ -349,7 +414,7 @@ export const BlueprintSVG: React.FC<BlueprintSVGProps> = ({
                 width={legWidthSvg}
                 height={h_base_svg}
                 fill={leg_style === 'steel' ? '#334155' : woodColor}
-                stroke="#0f172a"
+                stroke={frameStroke}
                 strokeWidth="0.6"
               />
               <rect
@@ -358,7 +423,7 @@ export const BlueprintSVG: React.FC<BlueprintSVGProps> = ({
                 width={legWidthSvg}
                 height={h_base_svg}
                 fill={leg_style === 'steel' ? '#334155' : woodColor}
-                stroke="#0f172a"
+                stroke={frameStroke}
                 strokeWidth="0.6"
               />
             </>
@@ -374,9 +439,13 @@ export const BlueprintSVG: React.FC<BlueprintSVGProps> = ({
           height={h_base_svg}
           fill={woodColor}
           fillOpacity={0.78}
-          stroke="#0f172a"
+          stroke={frameStroke}
           strokeWidth="0.8"
-        />
+          className={interactiveClass}
+          onClick={() => onSelectSection?.('base', false)}
+        >
+          <title>하부 걸레받이 박스형 ({clearance_mm}mm)</title>
+        </rect>
       )}
 
       {/* ==================== 2. 측면도 (SIDE VIEW) ==================== */}
@@ -389,9 +458,13 @@ export const BlueprintSVG: React.FC<BlueprintSVGProps> = ({
           height={h_frame_svg}
           fill={woodColor}
           fillOpacity={0.85}
-          stroke="#0f172a"
+          stroke={frameStroke}
           strokeWidth="0.9"
-        />
+          className={interactiveClass}
+          onClick={() => onSelectSection?.('dimensions', false)}
+        >
+          <title>측면 깊이 {D}mm (클릭하여 규격 설정)</title>
+        </rect>
 
         {/* 측면 선반 단면 점선 표시 */}
         {shelfYPositions.map((sy, idx) => (
@@ -401,7 +474,7 @@ export const BlueprintSVG: React.FC<BlueprintSVGProps> = ({
             y1={sy + t_svg / 2}
             x2={sideX + d_svg}
             y2={sy + t_svg / 2}
-            stroke="#0f172a"
+            stroke={frameStroke}
             strokeOpacity={0.5}
             strokeWidth={Math.max(t_svg * 0.6, 1)}
           />
@@ -416,7 +489,7 @@ export const BlueprintSVG: React.FC<BlueprintSVGProps> = ({
               width={Math.min(legWidthSvg, d_svg * 0.25)}
               height={h_base_svg}
               fill={leg_style === 'steel' ? '#334155' : woodColor}
-              stroke="#0f172a"
+              stroke={frameStroke}
               strokeWidth="0.6"
             />
             <rect
@@ -425,7 +498,7 @@ export const BlueprintSVG: React.FC<BlueprintSVGProps> = ({
               width={Math.min(legWidthSvg, d_svg * 0.25)}
               height={h_base_svg}
               fill={leg_style === 'steel' ? '#334155' : woodColor}
-              stroke="#0f172a"
+              stroke={frameStroke}
               strokeWidth="0.6"
             />
           </>
@@ -439,28 +512,32 @@ export const BlueprintSVG: React.FC<BlueprintSVGProps> = ({
             height={h_base_svg}
             fill={woodColor}
             fillOpacity={0.75}
-            stroke="#0f172a"
+            stroke={frameStroke}
             strokeWidth="0.7"
           />
         )}
 
         {/* 측면 후면 하단 걸레받이 노치 (Skirting Notch) */}
         {skirting_notch !== 'none' && notchW > 0 && notchH > 0 && (
-          <g>
+          <g
+            className={interactiveClass}
+            onClick={() => onSelectSection?.('base', true)}
+          >
+            <title>벽면 걸레받이 노치 가공 (클릭하여 하부 특주 설정)</title>
             <rect
               x={sideX + d_svg - notchW}
               y={floorY - notchH}
               width={notchW + 1}
               height={notchH + 1}
-              fill="#0f1318"
+              fill={bgFill}
               stroke="#ef4444"
               strokeWidth="1"
               strokeDasharray="2 1"
             />
             <text
               x={sideX + d_svg + 4}
-              y={floorY - notchH / 2}
-              fill="#f87171"
+              y={floorY - notchH / 2 + 2}
+              fill="#ef4444"
               fontSize="7.5"
               fontWeight="600"
             >
@@ -473,86 +550,134 @@ export const BlueprintSVG: React.FC<BlueprintSVGProps> = ({
       {/* ==================== 3. 치수 보조선 및 수치 표기 ==================== */}
 
       {/* 가로 폭 (W) 치수선 */}
-      <g stroke="#38bdf8" strokeWidth="0.8">
-        <line
-          x1={frontX}
-          y1={frontTopY - 10}
-          x2={frontX + w_svg}
-          y2={frontTopY - 10}
-        />
-        <line
-          x1={frontX}
-          y1={frontTopY - 14}
-          x2={frontX}
-          y2={frontTopY - 6}
-        />
-        <line
-          x1={frontX + w_svg}
-          y1={frontTopY - 14}
-          x2={frontX + w_svg}
-          y2={frontTopY - 6}
-        />
-      </g>
-      <text
-        x={frontCenterX}
-        y={frontTopY - 14}
-        textAnchor="middle"
-        fill="#38bdf8"
-        fontSize="9.5"
-        fontWeight="700"
+      <g
+        className={interactiveClass}
+        onClick={() => onSelectSection?.('dimensions', false)}
       >
-        W {W}mm
-      </text>
-
-      {/* 전체 높이 (H) 치수선 (좌측) */}
-      <g stroke="#38bdf8" strokeWidth="0.8">
-        <line
-          x1={frontX - 12}
-          y1={frontTopY}
-          x2={frontX - 12}
-          y2={floorY}
-        />
-        <line
-          x1={frontX - 16}
-          y1={frontTopY}
-          x2={frontX - 8}
-          y2={frontTopY}
-        />
-        <line x1={frontX - 16} y1={floorY} x2={frontX - 8} y2={floorY} />
-      </g>
-      <text
-        x={frontX - 16}
-        y={frontTopY + h_svg / 2}
-        textAnchor="end"
-        dominantBaseline="middle"
-        fill="#38bdf8"
-        fontSize="9"
-        fontWeight="700"
-      >
-        H {H}
-      </text>
-
-      {/* 단당 유효 내경 (H_shelf_net) 표시 (정면 우측 첫 번째 칸) */}
-      {shelfYPositions.length >= 2 && (
-        <g>
+        <g stroke={dimStroke} strokeWidth="0.8">
           <line
-            x1={frontX + w_svg + 8}
-            y1={shelfYPositions[0] + t_svg}
-            x2={frontX + w_svg + 8}
-            y2={shelfYPositions[1]}
-            stroke="#fbbf24"
-            strokeWidth="0.9"
+            x1={frontX}
+            y1={frontTopY - 9}
+            x2={frontX + w_svg}
+            y2={frontTopY - 9}
           />
-          <text
-            x={frontX + w_svg + 12}
-            y={(shelfYPositions[0] + t_svg + shelfYPositions[1]) / 2 + 3}
-            fill="#fbbf24"
-            fontSize="8.5"
-            fontWeight="600"
-          >
-            내경 {netShelfHeightMm}mm
-          </text>
+          <line
+            x1={frontX}
+            y1={frontTopY - 13}
+            x2={frontX}
+            y2={frontTopY - 5}
+          />
+          <line
+            x1={frontX + w_svg}
+            y1={frontTopY - 13}
+            x2={frontX + w_svg}
+            y2={frontTopY - 5}
+          />
         </g>
+        <text
+          x={frontCenterX}
+          y={frontTopY - 13}
+          textAnchor="middle"
+          fill={dimStroke}
+          fontSize="9.5"
+          fontWeight="700"
+        >
+          W {W}mm
+        </text>
+      </g>
+
+      {/* 전체 높이 (H) 치수선 (좌측 - mm 단위 포함 및 좌측 최소 60px 여백으로 잘림 방지) */}
+      <g
+        className={interactiveClass}
+        onClick={() => onSelectSection?.('dimensions', false)}
+      >
+        <g stroke={dimStroke} strokeWidth="0.8">
+          <line
+            x1={frontX - 10}
+            y1={frontTopY}
+            x2={frontX - 10}
+            y2={floorY}
+          />
+          <line
+            x1={frontX - 14}
+            y1={frontTopY}
+            x2={frontX - 6}
+            y2={frontTopY}
+          />
+          <line x1={frontX - 14} y1={floorY} x2={frontX - 6} y2={floorY} />
+        </g>
+        <text
+          x={frontX - 13}
+          y={frontTopY + h_svg / 2}
+          textAnchor="end"
+          dominantBaseline="middle"
+          fill={dimStroke}
+          fontSize="8.5"
+          fontWeight="700"
+        >
+          H {H}mm
+        </text>
+      </g>
+
+      {/* 단별 유효 내경 표시 (비대칭 활성화 시 전 단 개별 표시, 균등 분할 시 1단 평균 표시) */}
+      {hasCustomHeights && custom_shelf_heights_mm ? (
+        <g
+          className={interactiveClass}
+          onClick={() => onSelectSection?.('dimensions', true)}
+        >
+          {custom_shelf_heights_mm.map((hVal, idx) => {
+            if (idx + 1 >= shelfYPositions.length) return null;
+            const yTop = shelfYPositions[idx] + t_svg;
+            const yBottom = shelfYPositions[idx + 1];
+            const midY = (yTop + yBottom) / 2;
+            return (
+              <g key={idx}>
+                <line
+                  x1={frontX + w_svg + 7}
+                  y1={yTop}
+                  x2={frontX + w_svg + 7}
+                  y2={yBottom}
+                  stroke={innerDimColor}
+                  strokeWidth="0.9"
+                />
+                <text
+                  x={frontX + w_svg + 11}
+                  y={midY + 2.5}
+                  fill={innerDimColor}
+                  fontSize={N >= 6 ? '7' : '8'}
+                  fontWeight="600"
+                >
+                  {idx + 1}단 {hVal}mm
+                </text>
+              </g>
+            );
+          })}
+        </g>
+      ) : (
+        shelfYPositions.length >= 2 && (
+          <g
+            className={interactiveClass}
+            onClick={() => onSelectSection?.('dimensions', false)}
+          >
+            <line
+              x1={frontX + w_svg + 8}
+              y1={shelfYPositions[0] + t_svg}
+              x2={frontX + w_svg + 8}
+              y2={shelfYPositions[1]}
+              stroke={innerDimColor}
+              strokeWidth="0.9"
+            />
+            <text
+              x={frontX + w_svg + 12}
+              y={(shelfYPositions[0] + t_svg + shelfYPositions[1]) / 2 + 3}
+              fill={innerDimColor}
+              fontSize="8.5"
+              fontWeight="600"
+            >
+              내경 {netShelfHeightMm}mm
+            </text>
+          </g>
+        )
       )}
 
       {/* 하부 유효 높이 (clearance_mm) 표시 */}
@@ -560,48 +685,55 @@ export const BlueprintSVG: React.FC<BlueprintSVGProps> = ({
         <text
           x={frontX + w_svg + 12}
           y={floorY - h_base_svg / 2 + 3}
-          fill="#34d399"
+          fill={baseDimColor}
           fontSize="8"
           fontWeight="600"
+          className={interactiveClass}
+          onClick={() => onSelectSection?.('base', false)}
         >
           하부 {clearance_mm}mm
         </text>
       )}
 
       {/* 측면 깊이 (D) 치수선 */}
-      <g stroke="#38bdf8" strokeWidth="0.8">
-        <line
-          x1={sideX}
-          y1={sideTopY - 10}
-          x2={sideX + d_svg}
-          y2={sideTopY - 10}
-        />
-        <line
-          x1={sideX}
-          y1={sideTopY - 14}
-          x2={sideX}
-          y2={sideTopY - 6}
-        />
-        <line
-          x1={sideX + d_svg}
-          y1={sideTopY - 14}
-          x2={sideX + d_svg}
-          y2={sideTopY - 6}
-        />
-      </g>
-      <text
-        x={sideCenterX}
-        y={sideTopY - 14}
-        textAnchor="middle"
-        fill="#38bdf8"
-        fontSize="9.5"
-        fontWeight="700"
+      <g
+        className={interactiveClass}
+        onClick={() => onSelectSection?.('dimensions', false)}
       >
-        D {D}mm
-      </text>
+        <g stroke={dimStroke} strokeWidth="0.8">
+          <line
+            x1={sideX}
+            y1={sideTopY - 9}
+            x2={sideX + d_svg}
+            y2={sideTopY - 9}
+          />
+          <line
+            x1={sideX}
+            y1={sideTopY - 13}
+            x2={sideX}
+            y2={sideTopY - 5}
+          />
+          <line
+            x1={sideX + d_svg}
+            y1={sideTopY - 13}
+            x2={sideX + d_svg}
+            y2={sideTopY - 5}
+          />
+        </g>
+        <text
+          x={sideCenterX}
+          y={sideTopY - 13}
+          textAnchor="middle"
+          fill={dimStroke}
+          fontSize="9.5"
+          fontWeight="700"
+        >
+          D {D}mm
+        </text>
+      </g>
 
       {/* 하단 도면 메타 정보 바 */}
-      <text x="16" y="308" fill="#94a3b8" fontSize="8.5">
+      <text x="16" y="316" fill={titleFill} fontSize="8.5">
         수종: {LABELS.wood_species[wood_species]} | 두께: {T}T | 단수: {N}단
         {V > 0 ? ` (세로칸막이 ${V}열)` : ''} | 축척 S={scale.toFixed(3)}
       </text>

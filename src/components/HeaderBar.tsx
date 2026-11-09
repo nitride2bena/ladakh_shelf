@@ -58,17 +58,23 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
                 원목 선반 사양 컨피규레이터
               </h1>
               <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[11px] font-semibold text-amber-500">
-                AI Studio v3.0
+                AI Studio v3.1
               </span>
             </div>
             <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-              Deterministic 60fps SVG Blueprint &amp; Gemini Structured Output
+              Interactive 60fps SVG Blueprint, Auto-Balance &amp; Gemini Structured Output
             </p>
           </div>
         </div>
 
         {/* Step Navigation Pills */}
-        <nav className="flex items-center gap-1 rounded-xl border p-1" style={{ borderColor: 'var(--border-color)', backgroundColor: 'var(--bg-main)' }}>
+        <nav
+          className="flex items-center gap-1 rounded-xl border p-1"
+          style={{
+            borderColor: 'var(--border-color)',
+            backgroundColor: 'var(--bg-main)',
+          }}
+        >
           {steps.map((s) => {
             const isActive = currentStep === s.num;
             const isDisabled = s.num === 3 && !canProceedToStep3;

@@ -22,8 +22,8 @@ export function clamp(val: number, min: number, max: number): number {
 }
 
 /**
- * FSD Section 4.1: 반응형 듀얼 뷰포트(정면도 + 측면도) 스케일 변환 공식
- * viewBox="0 0 520 320" 내에서 정면도 최대 280x240, 측면도 최대 120x240
+ * FSD v3.1 Section 4.1: 반응형 듀얼 뷰포트(정면도 + 측면도) 안전 여백 보장 스케일 변환 공식
+ * viewBox="0 0 540 330" 내에서 정면도 최대 260x225, 측면도 최대 115x225
  */
 export function computeBlueprintMetrics(
   spec: Pick<WoodShelfSpecificationData, 'dimensions' | 'base_clearance'>,
@@ -39,8 +39,8 @@ export function computeBlueprintMetrics(
       ? 0
       : clamp(spec.base_clearance.clearance_mm, 0, maxClearanceAllowedMm);
 
-  // 1. 공통 축척 배율 (S)
-  const scale = Math.min(280 / W, 120 / D, 240 / H);
+  // 1. 공통 축척 배율 (S) - 상단 뷰 타이틀(y=16) 및 좌측 치수 텍스트 안전 여백 보장
+  const scale = Math.min(260 / W, 115 / D, 225 / H);
 
   // 2. 화면 렌더링 외경 치수
   const w_svg = W * scale;
@@ -68,7 +68,7 @@ export function computeBlueprintMetrics(
 }
 
 /**
- * FSD Section 4.2: 내부 유효 공간, 로봇청소기 진입 판정, BOM 면적 및 예상 중량 계산
+ * FSD v3.1 Section 4.2: 내부 유효 공간, 로봇청소기 진입 판정, BOM 면적 및 예상 중량 계산
  */
 export function computeShelfSummary(
   spec: Omit<WoodShelfSpecificationData, 'computed_summary' | 'generated_at'>,

@@ -2,7 +2,9 @@ import React, { useState, useRef, useEffect } from 'react';
 import {
   WoodShelfSpecificationData,
   LABELS,
+  WOOD_COLORS,
   PRESET_DEFINITIONS,
+  ThemeMode,
 } from '../types/shelfSchema';
 import { BlueprintSVG } from './BlueprintSVG';
 import {
@@ -15,10 +17,13 @@ import {
   Sparkles,
   ArrowLeft,
   Loader2,
+  Share2,
+  ClipboardList,
 } from 'lucide-react';
 
 interface Step3ExportViewProps {
   spec: WoodShelfSpecificationData;
+  theme: ThemeMode;
   onBackToStep2: () => void;
   onGenerateAIReview: () => Promise<void>;
   isGeneratingReview: boolean;
@@ -49,7 +54,9 @@ export function buildMarkdownDocument(spec: WoodShelfSpecificationData): string 
   const customHeightsStr =
     dimensions.custom_shelf_heights_mm &&
     dimensions.custom_shelf_heights_mm.length > 0
-      ? dimensions.custom_shelf_heights_mm.map((h, i) => `${i + 1}단: ${h}mm`).join(', ')
+      ? dimensions.custom_shelf_heights_mm
+          .map((h, i) => `${i + 1}단: ${h}mm`)
+          .join(', ')
       : `균등 분할 (단당 약 ${computed_summary.net_shelf_height_mm}mm)`;
 
   const warningsSection =
@@ -81,7 +88,7 @@ export function buildMarkdownDocument(spec: WoodShelfSpecificationData): string 
 ## 2. 하부 베이스 및 공간 간섭 (Base & Clearance)
 
 - **하부 구조 형태:** ${LABELS.base_type[base_clearance.type]}
-- **바닥 유효 높이 ($H_{\\text{clearance}}$):** ${base_clearance.clearance_mm} mm
+- **바닥 유효 높이 (H_clearance):** ${base_clearance.clearance_mm} mm
 - **로봇청소기 진입 판정:** **${computed_summary.robot_badge_text}**
 - **다리 디자인:** ${base_clearance.leg_style ? LABELS.leg_style[base_clearance.leg_style] : '해당 없음 (비다리형)'}
 - **벽면 걸레받이 노치:** ${LABELS.skirting_notch[base_clearance.skirting_notch]}
@@ -125,14 +132,17 @@ ${
 
 export const Step3ExportView: React.FC<Step3ExportViewProps> = ({
   spec,
+  theme,
   onBackToStep2,
   onGenerateAIReview,
   isGeneratingReview,
 }) => {
   const [copied, setCopied] = useState(false);
-  const [activePreviewTab, setActivePreviewTab] = useState<'markdown' | 'json'>(
-    'markdown',
-  );
+  const [linkCopied, setLinkCopied] = useState(false);
+  // FSD v3.1 Section 7.1: 시각적 발주 사양서('report')를 기본 탭으로 제공
+  const [activePreviewTab, setActivePreviewTab] = useState<
+    'report' | 'markdown' | 'json'
+  >('report');
   const svgRef = useRef<SVGSVGElement | null>(null);
 
   useEffect(() => {
@@ -195,16 +205,9 @@ export const Step3ExportView: React.FC<Step3ExportViewProps> = ({
     );
   };
 
-  /**
-   * FSD Section 7.4: 클립보드 복사 (Clipboard API + Fallback)
-   */
-  const handleCopyClipboard = async () => {
-    const textToCopy =
-      activePreviewTab === 'markdown' ? markdownContent : jsonContent;
+  const copyTextWithFallback = async (textToCopy: string) => {
     try {
       await navigator.clipboard.writeText(textToCopy);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2200);
     } catch {
       const textarea = document.createElement('textarea');
       textarea.value = textToCopy;
@@ -214,10 +217,61 @@ export const Step3ExportView: React.FC<Step3ExportViewProps> = ({
       textarea.select();
       document.execCommand('copy');
       document.body.removeChild(textarea);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2200);
     }
   };
+
+  /**
+   * FSD v3.1 Section 7.5: 클립보드 복사
+   */
+  const handleCopyClipboard = async () => {
+    const textToCopy =
+      activePreviewTab === 'json' ? jsonContent : markdownContent;
+    await copyTextWithFallback(textToCopy);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2200);
+  };
+
+  /**
+   * FSD v3.1 Section 2.1 & 7.5: 현재 사양이 인코딩된 공유 URL 복사
+   */
+  const handleCopyShareLink = async () => {
+    const { computed_summary, generated_at, ai_review_comment, ...coreOnly } =
+      spec;
+    const encoded = btoa(
+      encodeURIComponent(JSON.stringify(coreOnly)),
+    );
+    const url = `${window.location.origin}${window.location.pathname}?spec=${encoded}`;
+    await copyTextWithFallback(url);
+    setLinkCopied(true);
+    setTimeout(() => setLinkCopied(false), 2200);
+  };
+
+  const {
+    client,
+    presetType,
+    basePresetOrigin,
+    dimensions,
+    base_clearance,
+    material_joinery,
+    finishing_hardware,
+    computed_summary,
+  } = spec;
+
+  const presetTitle =
+    presetType === 'custom'
+      ? `커스텀 사양 (원본: ${
+          PRESET_DEFINITIONS.find((p) => p.id === basePresetOrigin)?.title ||
+          '기본형'
+        })`
+      : PRESET_DEFINITIONS.find((p) => p.id === presetType)?.title || presetType;
+
+  const customHeightsStr =
+    dimensions.custom_shelf_heights_mm &&
+    dimensions.custom_shelf_heights_mm.length > 0
+      ? dimensions.custom_shelf_heights_mm
+          .map((h, i) => `${i + 1}단: ${h}mm`)
+          .join(' / ')
+      : `균등 분할 (단당 약 ${computed_summary.net_shelf_height_mm}mm)`;
 
   return (
     <div className="mx-auto flex max-w-[1600px] flex-col gap-5 px-4 py-5">
@@ -247,13 +301,36 @@ export const Step3ExportView: React.FC<Step3ExportViewProps> = ({
               Step 3. 최종 사양 검토 및 발주 문서/도면 내보내기
             </h2>
             <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-              마크다운(.md), 표준 스키마(.json), 벡터 도면(.svg) 다운로드 및 A4 인쇄를 지원합니다.
+              시각적 발주서 리포트, 마크다운(.md), 표준 스키마(.json), 벡터 도면(.svg) 다운로드 및 A4 인쇄를 지원합니다.
             </p>
           </div>
         </div>
 
         {/* 내보내기 버튼 그룹 */}
         <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={handleCopyShareLink}
+            className="flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-semibold transition hover:border-amber-500"
+            style={{
+              backgroundColor: 'var(--bg-elevated)',
+              borderColor: 'var(--border-color)',
+            }}
+            title="현재 설계된 사양을 URL 링크로 복사하여 공방이나 타인에게 공유합니다."
+          >
+            {linkCopied ? (
+              <>
+                <Check className="h-4 w-4 text-emerald-400" />
+                <span className="text-emerald-400">공유 링크 복사됨!</span>
+              </>
+            ) : (
+              <>
+                <Share2 className="h-4 w-4 text-sky-400" />
+                <span>설계 링크 공유</span>
+              </>
+            )}
+          </button>
+
           <button
             type="button"
             onClick={handleCopyClipboard}
@@ -336,6 +413,7 @@ export const Step3ExportView: React.FC<Step3ExportViewProps> = ({
               svgRef={svgRef}
               spec={spec}
               netShelfHeightMm={spec.computed_summary.net_shelf_height_mm}
+              theme={theme}
             />
           </div>
 
@@ -386,7 +464,7 @@ export const Step3ExportView: React.FC<Step3ExportViewProps> = ({
           </div>
         </div>
 
-        {/* 우측: Markdown / JSON 전문 프리뷰 */}
+        {/* 우측: 3-Tab 프리뷰 뷰어 (시각적 발주 사양서 / Markdown / JSON) */}
         <div className="print-only-full lg:col-span-7">
           <div
             className="flex h-full flex-col rounded-xl border p-4"
@@ -395,8 +473,23 @@ export const Step3ExportView: React.FC<Step3ExportViewProps> = ({
               borderColor: 'var(--border-color)',
             }}
           >
-            <div className="no-print mb-3 flex items-center justify-between border-b pb-2.5" style={{ borderColor: 'var(--border-color)' }}>
-              <div className="flex items-center gap-2">
+            <div
+              className="no-print mb-3 flex flex-wrap items-center justify-between gap-2 border-b pb-2.5"
+              style={{ borderColor: 'var(--border-color)' }}
+            >
+              <div className="flex flex-wrap items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setActivePreviewTab('report')}
+                  className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                    activePreviewTab === 'report'
+                      ? 'bg-amber-600 text-white'
+                      : 'opacity-70 hover:opacity-100'
+                  }`}
+                >
+                  <ClipboardList className="h-3.5 w-3.5" />
+                  <span>시각적 발주 사양서</span>
+                </button>
                 <button
                   type="button"
                   onClick={() => setActivePreviewTab('markdown')}
@@ -406,7 +499,7 @@ export const Step3ExportView: React.FC<Step3ExportViewProps> = ({
                       : 'opacity-70 hover:opacity-100'
                   }`}
                 >
-                  Markdown 발주서 (.md)
+                  Markdown 원문 (.md)
                 </button>
                 <button
                   type="button"
@@ -422,22 +515,360 @@ export const Step3ExportView: React.FC<Step3ExportViewProps> = ({
               </div>
               <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
                 파일명:{' '}
-                {activePreviewTab === 'markdown'
-                  ? `wood_shelf_spec_${filePrefix}.md`
-                  : `wood_shelf_spec_${filePrefix}.json`}
+                {activePreviewTab === 'json'
+                  ? `wood_shelf_spec_${filePrefix}.json`
+                  : `wood_shelf_spec_${filePrefix}.md`}
               </span>
             </div>
 
-            <pre
-              className="custom-scroll max-h-[600px] flex-1 overflow-auto rounded-lg border p-4 font-mono text-xs leading-relaxed"
-              style={{
-                backgroundColor: 'var(--bg-main)',
-                borderColor: 'var(--border-color)',
-                color: 'var(--text-main)',
-              }}
-            >
-              {activePreviewTab === 'markdown' ? markdownContent : jsonContent}
-            </pre>
+            {activePreviewTab === 'report' ? (
+              <div
+                className="print-only-full custom-scroll max-h-[640px] flex-1 space-y-4 overflow-auto rounded-lg border p-4 text-xs"
+                style={{
+                  backgroundColor: 'var(--bg-main)',
+                  borderColor: 'var(--border-color)',
+                }}
+              >
+                {/* 헤더 */}
+                <div
+                  className="flex flex-wrap items-center justify-between gap-2 border-b pb-3"
+                  style={{ borderColor: 'var(--border-color)' }}
+                >
+                  <div>
+                    <h3 className="text-base font-bold">
+                      원목 선반 제작 발주 사양서
+                    </h3>
+                    <p
+                      className="mt-0.5 text-[11px]"
+                      style={{ color: 'var(--text-muted)' }}
+                    >
+                      발주처: <strong>{client || '기본 발주 프로젝트'}</strong> · 기반 모델: {presetTitle}
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <span className="inline-block rounded-full bg-amber-500/20 px-2.5 py-0.5 text-[11px] font-bold text-amber-400">
+                      {dimensions.width_mm} × {dimensions.depth_mm} ×{' '}
+                      {dimensions.height_mm} mm ({dimensions.levels}단 /{' '}
+                      {dimensions.thickness_t}T)
+                    </span>
+                  </div>
+                </div>
+
+                {/* 섹션 1: 규격 및 수납 구조 */}
+                <div>
+                  <h4 className="mb-2 text-xs font-bold text-amber-500">
+                    1. 규격 및 수납 구조 (Dimensions &amp; Capacity)
+                  </h4>
+                  <div
+                    className="overflow-hidden rounded-lg border"
+                    style={{ borderColor: 'var(--border-color)' }}
+                  >
+                    <table className="w-full border-collapse text-left text-xs">
+                      <tbody>
+                        <tr
+                          className="border-b"
+                          style={{ borderColor: 'var(--border-color)' }}
+                        >
+                          <th
+                            className="w-1/3 px-3 py-2 font-semibold"
+                            style={{ backgroundColor: 'var(--bg-elevated)' }}
+                          >
+                            외경 치수 (W × D × H)
+                          </th>
+                          <td className="px-3 py-2 font-bold">
+                            {dimensions.width_mm} × {dimensions.depth_mm} ×{' '}
+                            {dimensions.height_mm} mm
+                          </td>
+                        </tr>
+                        <tr
+                          className="border-b"
+                          style={{ borderColor: 'var(--border-color)' }}
+                        >
+                          <th
+                            className="px-3 py-2 font-semibold"
+                            style={{ backgroundColor: 'var(--bg-elevated)' }}
+                          >
+                            수납 단수 / 부재 두께
+                          </th>
+                          <td className="px-3 py-2">
+                            <strong>{dimensions.levels}단</strong> (가로 판재{' '}
+                            {dimensions.levels + 1}매) /{' '}
+                            <strong>{dimensions.thickness_t}T</strong> (
+                            {dimensions.thickness_t}mm)
+                          </td>
+                        </tr>
+                        <tr
+                          className="border-b"
+                          style={{ borderColor: 'var(--border-color)' }}
+                        >
+                          <th
+                            className="px-3 py-2 font-semibold"
+                            style={{ backgroundColor: 'var(--bg-elevated)' }}
+                          >
+                            중간 세로 칸막이 / 유효 경간
+                          </th>
+                          <td className="px-3 py-2">
+                            {dimensions.vertical_dividers}열 (
+                            {dimensions.vertical_dividers + 1}분할) · 유효 경간{' '}
+                            <strong>{computed_summary.clear_span_mm} mm</strong>
+                          </td>
+                        </tr>
+                        <tr
+                          className="border-b"
+                          style={{ borderColor: 'var(--border-color)' }}
+                        >
+                          <th
+                            className="px-3 py-2 font-semibold"
+                            style={{ backgroundColor: 'var(--bg-elevated)' }}
+                          >
+                            단당 유효 내경 (총 {computed_summary.inner_total_height_mm}mm)
+                          </th>
+                          <td className="px-3 py-2 font-semibold text-amber-400">
+                            {customHeightsStr}
+                          </td>
+                        </tr>
+                        {dimensions.custom_shelf_height_note && (
+                          <tr>
+                            <th
+                              className="px-3 py-2 font-semibold"
+                              style={{ backgroundColor: 'var(--bg-elevated)' }}
+                            >
+                              단 높이 특기 메모
+                            </th>
+                            <td className="px-3 py-2">
+                              {dimensions.custom_shelf_height_note}
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* 섹션 2 & 3: 하부 베이스 & 목재/결구 */}
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div
+                    className="rounded-lg border p-3"
+                    style={{
+                      backgroundColor: 'var(--bg-surface)',
+                      borderColor: 'var(--border-color)',
+                    }}
+                  >
+                    <h4 className="mb-2 text-xs font-bold text-amber-500">
+                      2. 하부 베이스 및 공간 간섭
+                    </h4>
+                    <ul className="space-y-1.5 text-xs">
+                      <li className="flex justify-between">
+                        <span style={{ color: 'var(--text-muted)' }}>
+                          하부 구조 형태
+                        </span>
+                        <span className="font-semibold">
+                          {LABELS.base_type[base_clearance.type]}
+                        </span>
+                      </li>
+                      <li className="flex justify-between">
+                        <span style={{ color: 'var(--text-muted)' }}>
+                          바닥 유효 높이
+                        </span>
+                        <span className="font-semibold">
+                          {base_clearance.clearance_mm} mm
+                        </span>
+                      </li>
+                      <li className="flex justify-between">
+                        <span style={{ color: 'var(--text-muted)' }}>
+                          청소기 진입 판정
+                        </span>
+                        <span className="font-bold text-emerald-400">
+                          {computed_summary.robot_badge_text}
+                        </span>
+                      </li>
+                      <li className="flex justify-between">
+                        <span style={{ color: 'var(--text-muted)' }}>
+                          다리 디자인 / 레벨러
+                        </span>
+                        <span className="font-semibold">
+                          {base_clearance.leg_style
+                            ? LABELS.leg_style[base_clearance.leg_style]
+                            : '비다리형'}{' '}
+                          · {LABELS.leveler[base_clearance.leveler]}
+                        </span>
+                      </li>
+                      <li className="flex justify-between">
+                        <span style={{ color: 'var(--text-muted)' }}>
+                          벽면 걸레받이 노치
+                        </span>
+                        <span className="font-semibold">
+                          {LABELS.skirting_notch[base_clearance.skirting_notch]}
+                        </span>
+                      </li>
+                    </ul>
+                  </div>
+
+                  <div
+                    className="rounded-lg border p-3"
+                    style={{
+                      backgroundColor: 'var(--bg-surface)',
+                      borderColor: 'var(--border-color)',
+                    }}
+                  >
+                    <h4 className="mb-2 text-xs font-bold text-amber-500">
+                      3. 목재 수종 및 결구/보강
+                    </h4>
+                    <ul className="space-y-1.5 text-xs">
+                      <li className="flex items-center justify-between">
+                        <span style={{ color: 'var(--text-muted)' }}>
+                          원목 수종
+                        </span>
+                        <span className="flex items-center gap-1.5 font-bold">
+                          <span
+                            className="inline-block h-3 w-3 rounded-full border border-black/30"
+                            style={{
+                              backgroundColor:
+                                WOOD_COLORS[material_joinery.wood_species],
+                            }}
+                          />
+                          {LABELS.wood_species[material_joinery.wood_species]}
+                        </span>
+                      </li>
+                      <li className="flex justify-between">
+                        <span style={{ color: 'var(--text-muted)' }}>
+                          집성 등급
+                        </span>
+                        <span className="font-semibold">
+                          {LABELS.joinery_type[material_joinery.joinery_type]}
+                        </span>
+                      </li>
+                      <li className="flex justify-between">
+                        <span style={{ color: 'var(--text-muted)' }}>
+                          프레임 짜임 / 고정
+                        </span>
+                        <span className="font-semibold">
+                          {LABELS.frame_join[material_joinery.frame_join]} ·{' '}
+                          {LABELS.shelf_fixing[material_joinery.shelf_fixing]}
+                        </span>
+                      </li>
+                      <li className="flex justify-between">
+                        <span style={{ color: 'var(--text-muted)' }}>
+                          하중 처짐 보강
+                        </span>
+                        <span className="font-semibold">
+                          {LABELS.reinforcement[material_joinery.reinforcement]}
+                        </span>
+                      </li>
+                      <li className="flex justify-between">
+                        <span style={{ color: 'var(--text-muted)' }}>
+                          백패널 구성
+                        </span>
+                        <span className="font-semibold">
+                          {LABELS.backpanel[material_joinery.backpanel]}
+                        </span>
+                      </li>
+                    </ul>
+                  </div>
+                </div>
+
+                {/* 섹션 4 & 5: 표면 마감 및 예상 물량(BOM) */}
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div
+                    className="rounded-lg border p-3"
+                    style={{
+                      backgroundColor: 'var(--bg-surface)',
+                      borderColor: 'var(--border-color)',
+                    }}
+                  >
+                    <h4 className="mb-2 text-xs font-bold text-amber-500">
+                      4. 표면 마감 및 하드웨어 특주
+                    </h4>
+                    <ul className="space-y-1.5 text-xs">
+                      <li className="flex justify-between">
+                        <span style={{ color: 'var(--text-muted)' }}>
+                          표면 도장 마감
+                        </span>
+                        <span className="font-semibold">
+                          {LABELS.finish_coat[finishing_hardware.finish_coat]}
+                        </span>
+                      </li>
+                      <li className="flex justify-between">
+                        <span style={{ color: 'var(--text-muted)' }}>
+                          모서리 프로파일
+                        </span>
+                        <span className="font-semibold">
+                          {LABELS.edge_profile[finishing_hardware.edge_profile]}
+                        </span>
+                      </li>
+                      <li className="flex justify-between">
+                        <span style={{ color: 'var(--text-muted)' }}>
+                          배선 관통 홀 메모
+                        </span>
+                        <span className="font-semibold">
+                          {finishing_hardware.wire_hole_note || '없음'}
+                        </span>
+                      </li>
+                    </ul>
+                  </div>
+
+                  <div
+                    className="rounded-lg border p-3"
+                    style={{
+                      backgroundColor: 'var(--bg-surface)',
+                      borderColor: 'var(--border-color)',
+                    }}
+                  >
+                    <h4 className="mb-2 text-xs font-bold text-sky-400">
+                      5. 예상 물량(BOM) 및 구조 진단
+                    </h4>
+                    <div className="mb-2 grid grid-cols-2 gap-2 rounded bg-sky-500/10 p-2">
+                      <div>
+                        <span
+                          className="block text-[10px]"
+                          style={{ color: 'var(--text-muted)' }}
+                        >
+                          주요 판재 소요 면적
+                        </span>
+                        <span className="text-sm font-bold text-sky-400">
+                          {computed_summary.estimated_area_m2} m²
+                        </span>
+                      </div>
+                      <div>
+                        <span
+                          className="block text-[10px]"
+                          style={{ color: 'var(--text-muted)' }}
+                        >
+                          예상 본체 중량
+                        </span>
+                        <span className="text-sm font-bold text-sky-400">
+                          약 {computed_summary.estimated_weight_kg} kg
+                        </span>
+                      </div>
+                    </div>
+                    {computed_summary.warnings.length === 0 ? (
+                      <p className="text-[11px] text-emerald-400">
+                        ✅ 특이 구조 위험 없음 (유효 내경, 처짐 경간, 세장비 모두 기준 충족)
+                      </p>
+                    ) : (
+                      <ul className="space-y-1 text-[11px] text-amber-400">
+                        {computed_summary.warnings.map((w, idx) => (
+                          <li key={idx}>⚠️ {w}</li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <pre
+                className="print-only-full custom-scroll max-h-[640px] flex-1 overflow-auto rounded-lg border p-4 font-mono text-xs leading-relaxed"
+                style={{
+                  backgroundColor: 'var(--bg-main)',
+                  borderColor: 'var(--border-color)',
+                  color: 'var(--text-main)',
+                }}
+              >
+                {activePreviewTab === 'markdown'
+                  ? markdownContent
+                  : jsonContent}
+              </pre>
+            )}
           </div>
         </div>
       </div>

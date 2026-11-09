@@ -55,12 +55,12 @@ body {
   background: var(--text-muted);
 }
 
-/* A4 Print stylesheet (FSD Section 7.3) */
+/* A4 Print stylesheet (FSD v3.1 Section 7.4 잘림 방지 규약) */
 @media print {
   body {
     background: #ffffff !important;
     color: #0f172a !important;
-    font-size: 12pt !important;
+    font-size: 11pt !important;
   }
   .no-print {
     display: none !important;
@@ -68,6 +68,7 @@ body {
   .print-only-full {
     width: 100% !important;
     max-height: none !important;
+    height: auto !important;
     overflow: visible !important;
     border: 1px solid #cbd5e1 !important;
     background: #ffffff !important;
