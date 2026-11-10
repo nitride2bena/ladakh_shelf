@@ -1,5 +1,0 @@
-{
-  "name": "원목 선반 사양 컨피규레이터 (Wood Shelf Configurator v3.0)",
-  "description": "결정론적 수학/구조 검증 엔진(60fps 정면·측면 SVG 도면, BOM/중량 산출)과 Google Gemini AI(@google/genai) 기반 맞춤 설계 보조를 결합한 원목 선반 사양 조사 및 발주 시스템",
-  "requestFramePermissions": []
-}
