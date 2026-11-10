@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { FurnitureConfig } from '../types/furniture';
 import { createFurnitureModel } from '../utils/cadGeometry';
-import { Eye, Layers, RotateCcw, Maximize2 } from 'lucide-react';
+import { Eye, Layers, RotateCcw } from 'lucide-react';
 
 interface Viewport3DProps {
   config: FurnitureConfig;
@@ -16,10 +16,10 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({ config, onConfigChange }
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const modelGroupRef = useRef<THREE.Group | null>(null);
 
-  // 마우스/터치 인터랙션 상태
+  // 마우스/터치 인터랙션 상태 (기본 줌 거리 3.3으로 여유있게 확보)
   const isDraggingRef = useRef(false);
   const previousPointerPosition = useRef({ x: 0, y: 0 });
-  const cameraRotationRef = useRef({ theta: Math.PI / 4, phi: Math.PI / 6, radius: 2.8 });
+  const cameraRotationRef = useRef({ theta: Math.PI / 4, phi: Math.PI / 6, radius: 3.3 });
 
   const [fps, setFps] = useState(60);
 
@@ -31,7 +31,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({ config, onConfigChange }
 
     // 1. Scene 생성
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x1a1a1a); // 다크 테마 배경 (#1A1A1A)
+    scene.background = new THREE.Color(0x18181a); // 감성 다크 스튜디오 배경
     sceneRef.current = scene;
 
     // 2. Camera 생성
@@ -49,25 +49,22 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({ config, onConfigChange }
     container.innerHTML = '';
     container.appendChild(renderer.domElement);
 
-    // 4. 조명 세팅 (원목 가구 감성 세련화 스튜디오 조명)
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.85);
+    // 4. 조명 세팅 (원목 질감 살리는 스튜디오 조명)
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.9);
     scene.add(ambientLight);
 
-    // 주광 (Key Light - 웜 톤)
-    const keyLight = new THREE.DirectionalLight(0xfff3e0, 1.4);
+    const keyLight = new THREE.DirectionalLight(0xfff5e6, 1.4);
     keyLight.position.set(3, 5, 4);
     keyLight.castShadow = true;
     keyLight.shadow.mapSize.width = 1024;
     keyLight.shadow.mapSize.height = 1024;
-    keyLight.shadow.bias = -0.0001;
     scene.add(keyLight);
 
-    // 보조광 (Fill Light - 쿨 톤)
     const fillLight = new THREE.DirectionalLight(0xddeeff, 0.6);
     fillLight.position.set(-4, 3, -2);
     scene.add(fillLight);
 
-    // 5. 바닥 그리드 및 섀도우 플레인
+    // 5. 바닥 그리드
     const gridHelper = new THREE.GridHelper(4, 20, 0x444448, 0x28282c);
     gridHelper.position.y = -0.001;
     scene.add(gridHelper);
@@ -79,20 +76,18 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({ config, onConfigChange }
     floor.receiveShadow = true;
     scene.add(floor);
 
-    // 6. 모델 초기 추가
+    // 6. 모델 생성 및 추가
     const model = createFurnitureModel(config);
     modelGroupRef.current = model;
     scene.add(model);
 
-    // 7. FPS 측정 및 애니메이션 렌더 루프
+    // 7. 렌더 루프
     let frameCount = 0;
     let lastTime = performance.now();
     let animId: number;
 
     const animate = () => {
       animId = requestAnimationFrame(animate);
-
-      // FPS 계산
       frameCount++;
       const now = performance.now();
       if (now - lastTime >= 1000) {
@@ -100,12 +95,11 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({ config, onConfigChange }
         frameCount = 0;
         lastTime = now;
       }
-
       renderer.render(scene, camera);
     };
     animate();
 
-    // 8. 윈도우 리사이즈 대응
+    // 8. 윈도우 리사이즈
     const handleResize = () => {
       if (!containerRef.current || !renderer || !camera) return;
       const newW = containerRef.current.clientWidth;
@@ -126,7 +120,6 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({ config, onConfigChange }
     };
   }, []);
 
-  // 카메라 구면 좌표계 갱신 함수
   const updateCameraPosition = () => {
     if (!cameraRef.current) return;
     const { theta, phi, radius } = cameraRotationRef.current;
@@ -141,7 +134,6 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({ config, onConfigChange }
     cameraRef.current.lookAt(0, 0.6, 0);
   };
 
-  // 설정값 변경 시 모델 갱신
   useEffect(() => {
     if (!sceneRef.current) return;
     if (modelGroupRef.current) {
@@ -152,7 +144,6 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({ config, onConfigChange }
     sceneRef.current.add(newModel);
   }, [config]);
 
-  // 포인터 이벤트 핸들러 (마우스 회전/터치)
   const handlePointerDown = (e: React.PointerEvent) => {
     isDraggingRef.current = true;
     previousPointerPosition.current = { x: e.clientX, y: e.clientY };
@@ -180,13 +171,12 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({ config, onConfigChange }
   const handleWheel = (e: React.WheelEvent) => {
     e.preventDefault();
     const zoomDelta = e.deltaY * 0.0015;
-    cameraRotationRef.current.radius = Math.max(1.2, Math.min(5.5, cameraRotationRef.current.radius + zoomDelta));
+    cameraRotationRef.current.radius = Math.max(1.5, Math.min(6.5, cameraRotationRef.current.radius + zoomDelta));
     updateCameraPosition();
   };
 
-  // 카메라 뷰 리셋
   const handleResetView = () => {
-    cameraRotationRef.current = { theta: Math.PI / 4, phi: Math.PI / 6, radius: 2.8 };
+    cameraRotationRef.current = { theta: Math.PI / 4, phi: Math.PI / 6, radius: 3.3 };
     updateCameraPosition();
   };
 
@@ -202,8 +192,8 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({ config, onConfigChange }
         onWheel={handleWheel}
       />
 
-      {/* 뷰포트 상단 오버레이 HUD */}
-      <div className="absolute top-4 left-4 flex items-center gap-2 pointer-events-none">
+      {/* 뷰포트 좌측 상단 HUD */}
+      <div className="absolute top-4 left-4 flex flex-col sm:flex-row items-start sm:items-center gap-2 pointer-events-none z-10">
         <div className="bg-panel-surface/80 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/10 text-xs font-mono text-gray-300 flex items-center gap-2 shadow-lg">
           <span className="w-2 h-2 rounded-full bg-semantic-emerald animate-pulse"></span>
           <span>{fps} FPS (WebGL 2.0)</span>
@@ -213,14 +203,14 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({ config, onConfigChange }
         </div>
       </div>
 
-      {/* 뷰포트 우측 툴바 (X-Ray, Diff, 리셋) */}
-      <div className="absolute top-4 right-4 flex flex-col gap-2 z-10">
+      {/* 뷰포트 우측 상단 툴바 (X-Ray, Diff, 리셋: top-16으로 분리하여 패널 토글 버튼과 겹치지 않게 함) */}
+      <div className="absolute top-16 md:top-4 md:right-36 right-4 flex flex-col md:flex-row gap-2 z-10">
         <button
           onClick={handleResetView}
           title="카메라 시점 초기화"
           className="p-2.5 rounded-xl bg-panel-surface/80 hover:bg-panel-elevated backdrop-blur-md border border-white/10 text-gray-300 hover:text-white transition shadow-lg"
         >
-          <RotateCcw size={18} />
+          <RotateCcw size={16} />
         </button>
 
         <button
@@ -232,7 +222,7 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({ config, onConfigChange }
               : 'bg-panel-surface/80 hover:bg-panel-elevated text-gray-300 border-white/10'
           }`}
         >
-          <Eye size={18} />
+          <Eye size={16} />
         </button>
 
         <button
@@ -244,20 +234,19 @@ export const Viewport3D: React.FC<Viewport3DProps> = ({ config, onConfigChange }
               : 'bg-panel-surface/80 hover:bg-panel-elevated text-gray-300 border-white/10'
           }`}
         >
-          <Layers size={18} />
+          <Layers size={16} />
         </button>
       </div>
 
-      {/* 상태 배지: X-Ray 활성화 안내 */}
+      {/* 안내 알림 배지 */}
       {config.xrayMode && (
-        <div className="absolute bottom-24 left-1/2 -translate-x-1/2 bg-semantic-blue/90 text-white text-xs px-4 py-1.5 rounded-full backdrop-blur-md shadow-lg pointer-events-none flex items-center gap-1.5 animate-bounce">
+        <div className="absolute top-20 left-1/2 -translate-x-1/2 bg-semantic-blue/90 text-white text-xs px-4 py-1.5 rounded-full backdrop-blur-md shadow-lg pointer-events-none flex items-center gap-1.5 animate-bounce z-10">
           <span>● X-Ray 투시 모드: 도미노 결구 촉 및 목심 위치 강조</span>
         </div>
       )}
 
-      {/* 상태 배지: Diff 활성화 안내 */}
       {config.diffMode && (
-        <div className="absolute bottom-24 left-1/2 -translate-x-1/2 bg-semantic-emerald/90 text-white text-xs px-4 py-1.5 rounded-full backdrop-blur-md shadow-lg pointer-events-none flex items-center gap-1.5 animate-bounce">
+        <div className="absolute top-20 left-1/2 -translate-x-1/2 bg-semantic-emerald/90 text-white text-xs px-4 py-1.5 rounded-full backdrop-blur-md shadow-lg pointer-events-none flex items-center gap-1.5 animate-bounce z-10">
           <span>● 3D Diff 비교: 장인 보강 부재(초록색) 오버레이 활성</span>
         </div>
       )}
